@@ -1,18 +1,19 @@
 const fetch = require('node-fetch');
+const http = require('http');
 
-// Render Environment Variables (Ortam Değişkenleri)
+// Render Environment Variables
 const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 const MESSAGE = process.env.MESSAGE;
 
-if (!TOKENS.length || !CHANNEL_ID || !MESSAGE) {
-    console.error("Hata: TOKENS, CHANNEL_ID veya MESSAGE eksik!");
+if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
+    console.error("Hata: TOKENS, CHANNEL_IDS veya MESSAGE ortam değişkenleri eksik!");
     process.exit(1);
 }
 
-const sendMessage = async (token) => {
+const sendMessage = async (token, channelId) => {
     try {
-        const response = await fetch(`https://discord.com/api/v9/channels/${CHANNEL_ID}/messages`, {
+        const response = await fetch(`https://discord.com/api/v9/channels/${channelId.trim()}/messages`, {
             method: 'POST',
             headers: {
                 'Authorization': token.trim(),
@@ -21,27 +22,32 @@ const sendMessage = async (token) => {
             body: JSON.stringify({ content: MESSAGE })
         });
 
+        const data = await response.json();
+
         if (response.status === 429) {
-            const retryAfter = (await response.json()).retry_after;
-            console.log(`Hız sınırına takıldı. ${retryAfter}ms bekleniyor...`);
-            setTimeout(() => sendMessage(token), retryAfter);
+            // Rate limit (hız sınırı) kontrolü
+            const retryAfter = data.retry_after || 5000;
+            console.log(`Hız sınırı! Kanal: ${channelId}, Bekleme: ${retryAfter}ms`);
+            setTimeout(() => sendMessage(token, channelId), retryAfter);
         } else if (response.ok) {
-            console.log(`Mesaj başarıyla gönderildi: ${token.substring(0, 10)}...`);
-            // Render'da ban yememek için çok kısa bir bekleme (Örn: 100ms)
-            setTimeout(() => sendMessage(token), 100); 
+            console.log(`Başarılı! Kanal: ${channelId} | Token: ${token.substring(0, 5)}...`);
+            // 0 saniye hedefi için çok kısa (10ms) gecikmeyle tekrarla
+            setTimeout(() => sendMessage(token, channelId), 10);
         } else {
-            console.log(`Hata oluştu (${response.status}): Token geçersiz olabilir.`);
+            console.log(`Hata (${response.status}): Kanal ${channelId} veya Token geçersiz.`);
         }
     } catch (error) {
-        console.error("İstek hatası:", error);
+        console.error("Bağlantı hatası:", error);
+        setTimeout(() => sendMessage(token, channelId), 1000);
     }
 };
 
-// Her token için işlemi başlat
+// Her token için tüm kanallarda işlemi başlat
 TOKENS.forEach(token => {
-    sendMessage(token);
+    CHANNEL_IDS.forEach(channelId => {
+        sendMessage(token, channelId);
+    });
 });
 
-// Render'ın kapanmaması için basit bir HTTP sunucusu (Opsiyonel ama önerilir)
-const http = require('http');
-http.createServer((req, res) => res.end("Bot Calisiyor!")).listen(process.env.PORT || 3000);
+// Render'ın port hatası vermemesi için basit sunucu
+http.createServer((req, res) => res.end("Bot Aktif!")).listen(process.env.PORT || 3000);
