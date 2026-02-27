@@ -1,38 +1,47 @@
-const axios = require('axios');
+const fetch = require('node-fetch');
 
-const tokens = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
-const channelIds = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
-const message = process.env.MESSAGE;
+// Render Environment Variables (Ortam Değişkenleri)
+const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const MESSAGE = process.env.MESSAGE;
 
-const YESIL = "\x1b[32m";
-const NORMAL = "\x1b[0m";
-
-async function baslat() {
-    if (tokens.length === 0 || channelIds.length === 0 || !message) {
-        console.log("Hata: Değişkenler eksik!");
-        return;
-    }
-
-    while (true) {
-        for (const token of tokens) {
-            const t = token.trim();
-            for (const channelId of channelIds) {
-                const c = channelId.trim();
-                try {
-                    // Bekleme süresi yok (0 saniye hedefi)
-                    axios.post(`https://discord.com/api/v9/channels/${c}/messages`, 
-                        { content: message }, 
-                        { headers: { 'Authorization': t } }
-                    ).then(res => {
-                        if (res.status === 200 || res.status === 201) {
-                            console.log(`${YESIL}Mesaj Gönderildi (Kanal: ...${c.slice(-4)} | Token: ...${t.slice(-4)})${NORMAL}`);
-                        }
-                    }).catch(() => { /* Hataları gizle */ });
-                } catch (e) { /* Hataları gizle */ }
-            }
-        }
-        // İşlemcinin kilitlenmemesi için çok küçük bir ara (isteğe bağlı)
-        await new Promise(resolve => setTimeout(resolve, 50)); 
-    }
+if (!TOKENS.length || !CHANNEL_ID || !MESSAGE) {
+    console.error("Hata: TOKENS, CHANNEL_ID veya MESSAGE eksik!");
+    process.exit(1);
 }
-baslat();
+
+const sendMessage = async (token) => {
+    try {
+        const response = await fetch(`https://discord.com/api/v9/channels/${CHANNEL_ID}/messages`, {
+            method: 'POST',
+            headers: {
+                'Authorization': token.trim(),
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ content: MESSAGE })
+        });
+
+        if (response.status === 429) {
+            const retryAfter = (await response.json()).retry_after;
+            console.log(`Hız sınırına takıldı. ${retryAfter}ms bekleniyor...`);
+            setTimeout(() => sendMessage(token), retryAfter);
+        } else if (response.ok) {
+            console.log(`Mesaj başarıyla gönderildi: ${token.substring(0, 10)}...`);
+            // Render'da ban yememek için çok kısa bir bekleme (Örn: 100ms)
+            setTimeout(() => sendMessage(token), 100); 
+        } else {
+            console.log(`Hata oluştu (${response.status}): Token geçersiz olabilir.`);
+        }
+    } catch (error) {
+        console.error("İstek hatası:", error);
+    }
+};
+
+// Her token için işlemi başlat
+TOKENS.forEach(token => {
+    sendMessage(token);
+});
+
+// Render'ın kapanmaması için basit bir HTTP sunucusu (Opsiyonel ama önerilir)
+const http = require('http');
+http.createServer((req, res) => res.end("Bot Calisiyor!")).listen(process.env.PORT || 3000);
