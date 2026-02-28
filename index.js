@@ -1,53 +1,54 @@
 const fetch = require('node-fetch');
 const http = require('http');
 
-// Render Environment Variables
 const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
 const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 const MESSAGE = process.env.MESSAGE;
 
+let currentTokenIndex = 0;
+
 if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
-    console.error("Hata: TOKENS, CHANNEL_IDS veya MESSAGE ortam değişkenleri eksik!");
+    console.error("Hata: Değişkenler eksik!");
     process.exit(1);
 }
 
-const sendMessage = async (token, channelId) => {
+const sendTick = async () => {
+    const token = TOKENS[currentTokenIndex].trim();
+    // Rastgele bir kanal seçiyoruz (daha güvenli)
+    const channelId = CHANNEL_IDS[Math.floor(Math.random() * CHANNEL_IDS.length)].trim();
+
+    // Sıradaki hesaba geç
+    currentTokenIndex = (currentTokenIndex + 1) % TOKENS.length;
+
     try {
-        const response = await fetch(`https://discord.com/api/v9/channels/${channelId.trim()}/messages`, {
+        const response = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages`, {
             method: 'POST',
             headers: {
-                'Authorization': token.trim(),
-                'Content-Type': 'application/json'
+                'Authorization': token,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0'
             },
             body: JSON.stringify({ content: MESSAGE })
         });
 
-        const data = await response.json();
-
-        if (response.status === 429) {
-            // Rate limit (hız sınırı) kontrolü
-            const retryAfter = data.retry_after || 5000;
-            console.log(`Hız sınırı! Kanal: ${channelId}, Bekleme: ${retryAfter}ms`);
-            setTimeout(() => sendMessage(token, channelId), retryAfter);
-        } else if (response.ok) {
-            console.log(`Başarılı! Kanal: ${channelId} | Token: ${token.substring(0, 5)}...`);
-            // 0 saniye hedefi için çok kısa (10ms) gecikmeyle tekrarla
-            setTimeout(() => sendMessage(token, channelId), 10);
+        if (response.ok) {
+            console.log(`[+] Hesap ${currentTokenIndex + 1} gönderdi.`);
         } else {
-            console.log(`Hata (${response.status}): Kanal ${channelId} veya Token geçersiz.`);
+            console.log(`[!] Hata/Limit: ${response.status}. Atlanıyor...`);
         }
     } catch (error) {
-        console.error("Bağlantı hatası:", error);
-        setTimeout(() => sendMessage(token, channelId), 1000);
+        console.log("Bağlantı hatası...");
     }
+
+    // --- BURASI KRİTİK ---
+    // 333ms ile 666ms arasında rastgele bir sayı seçer
+    const randomDelay = Math.floor(Math.random() * (666 - 333 + 1)) + 333;
+    
+    // Bir sonraki atışı bu rastgele sürede yap
+    setTimeout(sendTick, randomDelay);
 };
 
-// Her token için tüm kanallarda işlemi başlat
-TOKENS.forEach(token => {
-    CHANNEL_IDS.forEach(channelId => {
-        sendMessage(token, channelId);
-    });
-});
+// İlk tetiklemeyi başlat
+sendTick();
 
-// Render'ın port hatası vermemesi için basit sunucu
-http.createServer((req, res) => res.end("Bot Aktif!")).listen(process.env.PORT || 3000);
+http.createServer((req, res) => res.end("Dinamik Mod Aktif")).listen(process.env.PORT || 3000);
