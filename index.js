@@ -1,56 +1,53 @@
 const fetch = require('node-fetch');
 const http = require('http');
 
+// Render Environment Variables
 const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
 const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 const MESSAGE = process.env.MESSAGE;
 
-let currentTokenIndex = 0;
-let currentChannelIndex = 0;
-
-// 9 hesap için 3 saniye döngü hedefi: 3000 / 9 = 333ms
-const TICK_RATE = 333; 
-
 if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
-    console.error("Hata: Değişkenler eksik!");
+    console.error("Hata: TOKENS, CHANNEL_IDS veya MESSAGE ortam değişkenleri eksik!");
     process.exit(1);
 }
 
-const sendTick = async () => {
-    const token = TOKENS[currentTokenIndex].trim();
-    const channelId = CHANNEL_IDS[currentChannelIndex].trim();
-
-    // Bir sonraki tick için indeksleri hemen güncelle (Bekleme yapmadan)
-    currentTokenIndex = (currentTokenIndex + 1) % TOKENS.length;
-    // Her atışta kanalı da değiştiriyoruz
-    currentChannelIndex = (currentChannelIndex + 1) % CHANNEL_IDS.length;
-
+const sendMessage = async (token, channelId) => {
     try {
-        const response = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages`, {
+        const response = await fetch(`https://discord.com/api/v9/channels/${channelId.trim()}/messages`, {
             method: 'POST',
             headers: {
-                'Authorization': token,
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0'
+                'Authorization': token.trim(),
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ content: MESSAGE })
         });
 
-        if (response.ok) {
-            console.log(`[+] Hesap ${currentTokenIndex + 1} ATTI!`);
-        } else if (response.status === 429) {
-            console.log(`[!] Hesap ${currentTokenIndex + 1} LİMİTTE, ATLANDI.`);
+        const data = await response.json();
+
+        if (response.status === 429) {
+            // Rate limit (hız sınırı) kontrolü
+            const retryAfter = data.retry_after || 5000;
+            console.log(`Hız sınırı! Kanal: ${channelId}, Bekleme: ${retryAfter}ms`);
+            setTimeout(() => sendMessage(token, channelId), retryAfter);
+        } else if (response.ok) {
+            console.log(`Başarılı! Kanal: ${channelId} | Token: ${token.substring(0, 5)}...`);
+            // 0 saniye hedefi için çok kısa (10ms) gecikmeyle tekrarla
+            setTimeout(() => sendMessage(token, channelId), 10);
         } else {
-            console.log(`[!] Hata ${response.status}, SIRADAKİNE GEÇİLİYOR.`);
+            console.log(`Hata (${response.status}): Kanal ${channelId} veya Token geçersiz.`);
         }
     } catch (error) {
-        console.log("Bağlantı hatası, durmak yok...");
+        console.error("Bağlantı hatası:", error);
+        setTimeout(() => sendMessage(token, channelId), 1000);
     }
 };
 
-// ANA DÖNGÜ: Her 333ms'de bir ateş eder
-// Bu döngü hiçbir hatadan veya bekletmeden etkilenmez
-setInterval(sendTick, TICK_RATE);
+// Her token için tüm kanallarda işlemi başlat
+TOKENS.forEach(token => {
+    CHANNEL_IDS.forEach(channelId => {
+        sendMessage(token, channelId);
+    });
+});
 
-// Render hayatta kalsın diye
-http.createServer((req, res) => res.end("Maksimum Hiz Modu Aktif")).listen(process.env.PORT || 3000);
+// Render'ın port hatası vermemesi için basit sunucu
+http.createServer((req, res) => res.end("Bot Aktif!")).listen(process.env.PORT || 3000);
