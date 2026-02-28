@@ -7,16 +7,23 @@ const MESSAGE = process.env.MESSAGE;
 
 let currentTokenIndex = 0;
 let currentChannelIndex = 0;
-const WAIT_TIME = 3000; // Başarılı mesajdan sonra beklenecek süre
+
+// 9 hesap için 3 saniye döngü hedefi: 3000 / 9 = 333ms
+const TICK_RATE = 333; 
 
 if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
-    console.error("Değişkenler eksik!");
+    console.error("Hata: Değişkenler eksik!");
     process.exit(1);
 }
 
-const startLoop = async () => {
+const sendTick = async () => {
     const token = TOKENS[currentTokenIndex].trim();
     const channelId = CHANNEL_IDS[currentChannelIndex].trim();
+
+    // Bir sonraki tick için indeksleri hemen güncelle (Bekleme yapmadan)
+    currentTokenIndex = (currentTokenIndex + 1) % TOKENS.length;
+    // Her atışta kanalı da değiştiriyoruz
+    currentChannelIndex = (currentChannelIndex + 1) % CHANNEL_IDS.length;
 
     try {
         const response = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages`, {
@@ -29,41 +36,21 @@ const startLoop = async () => {
             body: JSON.stringify({ content: MESSAGE })
         });
 
-        // 1. Durum: Hız Sınırı (Rate Limit) veya IP Engeli
-        if (response.status === 429 || response.status === 403 || !response.ok) {
-            console.log(`[!] Hesap ${currentTokenIndex + 1} takıldı/limit yedi. SIRADAKİNE GEÇİLİYOR...`);
-            
-            // Beklemeden bir sonraki hesaba geç
-            nextIndex();
-            return startLoop(); 
-        }
-
-        // 2. Durum: Başarılı Mesaj
         if (response.ok) {
-            console.log(`[+] Hesap ${currentTokenIndex + 1} mesajı gönderdi! 3sn mola.`);
-            
-            // Mesaj başarılı, sonraki hesap ve kanal hazırlığı yap
-            nextIndex();
-            // Senin istediğin o 3 saniyelik ana döngü beklemesi
-            setTimeout(startLoop, WAIT_TIME);
+            console.log(`[+] Hesap ${currentTokenIndex + 1} ATTI!`);
+        } else if (response.status === 429) {
+            console.log(`[!] Hesap ${currentTokenIndex + 1} LİMİTTE, ATLANDI.`);
+        } else {
+            console.log(`[!] Hata ${response.status}, SIRADAKİNE GEÇİLİYOR.`);
         }
-
     } catch (error) {
-        console.log("Bağlantı hatası, sıradaki hesaba atlanıyor...");
-        nextIndex();
-        startLoop();
+        console.log("Bağlantı hatası, durmak yok...");
     }
 };
 
-// Sıradaki hesabı ve kanalı belirleyen yardımcı fonksiyon
-function nextIndex() {
-    currentTokenIndex = (currentTokenIndex + 1) % TOKENS.length;
-    // Her hesap değişiminde kanalı da değiştirmek istersen (opsiyonel):
-    currentChannelIndex = (currentChannelIndex + 1) % CHANNEL_IDS.length;
-}
+// ANA DÖNGÜ: Her 333ms'de bir ateş eder
+// Bu döngü hiçbir hatadan veya bekletmeden etkilenmez
+setInterval(sendTick, TICK_RATE);
 
-// Sistemi Başlat
-startLoop();
-
-// Render için basit server
-http.createServer((req, res) => res.end("Atlamali Sistem Aktif")).listen(process.env.PORT || 3000);
+// Render hayatta kalsın diye
+http.createServer((req, res) => res.end("Maksimum Hiz Modu Aktif")).listen(process.env.PORT || 3000);
