@@ -5,55 +5,65 @@ const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
 const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 const MESSAGE = process.env.MESSAGE;
 
-// Toplam döngü süresi 3 saniye (3000ms)
-// 9 hesap olduğu için her hesap arası gecikme: 3000 / 9 = 333ms
-const TOTAL_CYCLE = 3000; 
-const ACCOUNT_INTERVAL = TOTAL_CYCLE / TOKENS.length; 
+let currentTokenIndex = 0;
+let currentChannelIndex = 0;
+const WAIT_TIME = 3000; // Başarılı mesajdan sonra beklenecek süre
 
 if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
-    console.error("Hata: Değişkenler eksik!");
+    console.error("Değişkenler eksik!");
     process.exit(1);
 }
 
-const sendMessage = async (token, channelId) => {
+const startLoop = async () => {
+    const token = TOKENS[currentTokenIndex].trim();
+    const channelId = CHANNEL_IDS[currentChannelIndex].trim();
+
     try {
-        const response = await fetch(`https://discord.com/api/v9/channels/${channelId.trim()}/messages`, {
+        const response = await fetch(`https://discord.com/api/v9/channels/${channelId}/messages`, {
             method: 'POST',
             headers: {
-                'Authorization': token.trim(),
-                'Content-Type': 'application/json'
+                'Authorization': token,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0'
             },
             body: JSON.stringify({ content: MESSAGE })
         });
 
-        // Cloudflare/IP Engeli Kontrolü
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-            console.log("IP Engeli! 10 saniye bekleniyor...");
-            return setTimeout(() => sendMessage(token, channelId), 10000);
+        // 1. Durum: Hız Sınırı (Rate Limit) veya IP Engeli
+        if (response.status === 429 || response.status === 403 || !response.ok) {
+            console.log(`[!] Hesap ${currentTokenIndex + 1} takıldı/limit yedi. SIRADAKİNE GEÇİLİYOR...`);
+            
+            // Beklemeden bir sonraki hesaba geç
+            nextIndex();
+            return startLoop(); 
         }
 
-        if (response.status === 429) {
-            const data = await response.json();
-            const retryAfter = (data.retry_after * 1000) || 5000;
-            setTimeout(() => sendMessage(token, channelId), retryAfter);
-        } else {
-            // Mesaj gitsin ya da gitmesin, bu hesap tam 3 saniye sonra tekrar sıraya girer
-            setTimeout(() => sendMessage(token, channelId), TOTAL_CYCLE);
+        // 2. Durum: Başarılı Mesaj
+        if (response.ok) {
+            console.log(`[+] Hesap ${currentTokenIndex + 1} mesajı gönderdi! 3sn mola.`);
+            
+            // Mesaj başarılı, sonraki hesap ve kanal hazırlığı yap
+            nextIndex();
+            // Senin istediğin o 3 saniyelik ana döngü beklemesi
+            setTimeout(startLoop, WAIT_TIME);
         }
+
     } catch (error) {
-        setTimeout(() => sendMessage(token, channelId), 5000);
+        console.log("Bağlantı hatası, sıradaki hesaba atlanıyor...");
+        nextIndex();
+        startLoop();
     }
 };
 
-// Başlatma Mekanizması: Hesapları aralarında 333ms olacak şekilde sırayla başlatır
-TOKENS.forEach((token, index) => {
-    CHANNEL_IDS.forEach(channelId => {
-        setTimeout(() => {
-            console.log(`Hesap ${index + 1} başlatıldı...`);
-            sendMessage(token, channelId);
-        }, index * ACCOUNT_INTERVAL); 
-    });
-});
+// Sıradaki hesabı ve kanalı belirleyen yardımcı fonksiyon
+function nextIndex() {
+    currentTokenIndex = (currentTokenIndex + 1) % TOKENS.length;
+    // Her hesap değişiminde kanalı da değiştirmek istersen (opsiyonel):
+    currentChannelIndex = (currentChannelIndex + 1) % CHANNEL_IDS.length;
+}
 
-http.createServer((req, res) => res.end("Sistem Calisiyor")).listen(process.env.PORT || 3000);
+// Sistemi Başlat
+startLoop();
+
+// Render için basit server
+http.createServer((req, res) => res.end("Atlamali Sistem Aktif")).listen(process.env.PORT || 3000);
