@@ -1,13 +1,17 @@
 const fetch = require('node-fetch');
 const http = require('http');
 
-// Render Environment Variables
 const TOKENS = process.env.TOKENS ? process.env.TOKENS.split(',') : [];
 const CHANNEL_IDS = process.env.CHANNEL_IDS ? process.env.CHANNEL_IDS.split(',') : [];
 const MESSAGE = process.env.MESSAGE;
 
+// Toplam döngü süresi 3 saniye (3000ms)
+// 9 hesap olduğu için her hesap arası gecikme: 3000 / 9 = 333ms
+const TOTAL_CYCLE = 3000; 
+const ACCOUNT_INTERVAL = TOTAL_CYCLE / TOKENS.length; 
+
 if (!TOKENS.length || !CHANNEL_IDS.length || !MESSAGE) {
-    console.error("Hata: TOKENS, CHANNEL_IDS veya MESSAGE ortam değişkenleri eksik!");
+    console.error("Hata: Değişkenler eksik!");
     process.exit(1);
 }
 
@@ -22,32 +26,34 @@ const sendMessage = async (token, channelId) => {
             body: JSON.stringify({ content: MESSAGE })
         });
 
-        const data = await response.json();
+        // Cloudflare/IP Engeli Kontrolü
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            console.log("IP Engeli! 10 saniye bekleniyor...");
+            return setTimeout(() => sendMessage(token, channelId), 10000);
+        }
 
         if (response.status === 429) {
-            // Rate limit (hız sınırı) kontrolü
-            const retryAfter = data.retry_after || 5000;
-            console.log(`Hız sınırı! Kanal: ${channelId}, Bekleme: ${retryAfter}ms`);
+            const data = await response.json();
+            const retryAfter = (data.retry_after * 1000) || 5000;
             setTimeout(() => sendMessage(token, channelId), retryAfter);
-        } else if (response.ok) {
-            console.log(`Başarılı! Kanal: ${channelId} | Token: ${token.substring(0, 5)}...`);
-            // 0 saniye hedefi için çok kısa (10ms) gecikmeyle tekrarla
-            setTimeout(() => sendMessage(token, channelId), 10);
         } else {
-            console.log(`Hata (${response.status}): Kanal ${channelId} veya Token geçersiz.`);
+            // Mesaj gitsin ya da gitmesin, bu hesap tam 3 saniye sonra tekrar sıraya girer
+            setTimeout(() => sendMessage(token, channelId), TOTAL_CYCLE);
         }
     } catch (error) {
-        console.error("Bağlantı hatası:", error);
-        setTimeout(() => sendMessage(token, channelId), 1000);
+        setTimeout(() => sendMessage(token, channelId), 5000);
     }
 };
 
-// Her token için tüm kanallarda işlemi başlat
-TOKENS.forEach(token => {
+// Başlatma Mekanizması: Hesapları aralarında 333ms olacak şekilde sırayla başlatır
+TOKENS.forEach((token, index) => {
     CHANNEL_IDS.forEach(channelId => {
-        sendMessage(token, channelId);
+        setTimeout(() => {
+            console.log(`Hesap ${index + 1} başlatıldı...`);
+            sendMessage(token, channelId);
+        }, index * ACCOUNT_INTERVAL); 
     });
 });
 
-// Render'ın port hatası vermemesi için basit sunucu
-http.createServer((req, res) => res.end("Bot Aktif!")).listen(process.env.PORT || 3000);
+http.createServer((req, res) => res.end("Sistem Calisiyor")).listen(process.env.PORT || 3000);
